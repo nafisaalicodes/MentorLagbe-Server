@@ -116,6 +116,63 @@ app.get("/api/tuitions", async (req, res) => {
   }
 });
 
+// Browse Tuitions - Server-side Search & Filter
+app.get("/api/tuitions/browse", async (req, res) => {
+  try {
+    const { tuitionsCollection } = getCollections();
+
+    const { search = "", subject = "", classLevel = "", mode = "" } = req.query;
+
+    const query = {
+      approvalStatus: "approved",
+      isActive: true,
+    };
+
+    // Search by title or subject
+    if (search.trim()) {
+      const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      query.$or = [
+        { title: { $regex: safeSearch, $options: "i" } },
+        { subject: { $regex: safeSearch, $options: "i" } },
+      ];
+    }
+
+    // Filter by subject
+    if (subject.trim()) {
+      query.subject = subject.trim();
+    }
+
+    // Filter by class level
+    if (classLevel.trim()) {
+      query.classLevel = classLevel.trim();
+    }
+
+    // Filter by mode
+    if (["Online", "Offline"].includes(mode)) {
+      query.mode = mode;
+    }
+
+    const tuitions = await tuitionsCollection
+      .find(query)
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      count: tuitions.length,
+      data: tuitions,
+    });
+  } catch (error) {
+    console.error("Browse Tuitions Error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch tuition listings",
+    });
+  }
+});
+
 // Start Server
 const startServer = async () => {
   try {

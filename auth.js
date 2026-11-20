@@ -31,7 +31,7 @@ export const createAuth = (db) => {
           type: "string",
           required: false,
           defaultValue: "student",
-          input: false,
+          input: true,
         },
 
         subscriptionPlan: {

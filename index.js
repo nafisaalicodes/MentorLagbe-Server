@@ -1826,6 +1826,421 @@ app.patch(
   );
 
   // -------------------------------------
+  // Admin: helpers
+  // -------------------------------------
+
+  // BetterAuth may store _id as string or ObjectId depending on
+  // the adapter, so every id lookup matches both shapes.
+  const buildIdFilter = (rawId) => {
+    const id = String(rawId || "");
+
+    const conditions = [{ _id: id }];
+
+    if (ObjectId.isValid(id)) {
+      conditions.push({ _id: new ObjectId(id) });
+    }
+
+    return { $or: conditions };
+  };
+
+  const escapeRegex = (value) =>
+    String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const isValidRole = (role) =>
+    ["student", "tutor", "admin"].includes(String(role));
+
+  // -------------------------------------
+  // Admin: Platform statistics
+  // -------------------------------------
+
+  app.get(
+    "/api/admin/stats",
+    verifyToken,
+    verifyAdmin,
+    async (req, res) => {
+      try {
+        const {
+          usersCollection,
+          tuitionsCollection,
+          applicationsCollection,
+          paymentsCollection,
+        } = getCollections();
+
+        const [
+          totalUsers,
+          totalTutors,
+          totalStudents,
+          totalAdmins,
+          totalTuitions,
+          pendingTuitions,
+          approvedTuitions,
+          rejectedTuitions,
+          totalApplications,
+        ] = await Promise.all([
+          usersCollection.countDocuments(),
+          usersCollection.countDocuments({ role: "tutor" }),
+          usersCollection.countDocuments({ role: "student" }),
+          usersCollection.countDocuments({ role: "admin" }),
+          tuitionsCollection.countDocuments(),
+          tuitionsCollection.countDocuments({
+            approvalStatus: "pending",
+          }),
+          tuitionsCollection.countDocuments({
+            approvalStatus: "approved",
+          }),
+          tuitionsCollection.countDocuments({
+            approvalStatus: "rejected",
+          }),
+          applicationsCollection.countDocuments(),
+        ]);
+
+        const payments = await paymentsCollection
+          .find({})
+          .toArray();
+
+        // Everything that is not explicitly failed/refunded counts
+        // as settled revenue (Stripe webhook stores "paid").
+        const settledPayments = payments.filter((payment) => {
+          const status = String(
+            payment.paymentStatus || "paid"
+          ).toLowerCase();
+
+          return !["failed", "refunded", "canceled", "pending"].includes(
+            status
+          );
+        });
+
+        const totalRevenue = settledPayments.reduce(
+          (sum, payment) => sum + (Number(payment.amount) || 0),
+          0
+        );
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            totalUsers,
+            totalTutors,
+            totalStudents,
+            totalAdmins,
+            totalTuitions,
+            pendingTuitions,
+            approvedTuitions,
+            rejectedTuitions,
+            totalApplications,
+            totalPayments: settledPayments.length,
+            totalRevenue: Math.round(totalRevenue * 100) / 100,
+          },
+        });
+      } catch (error) {
+        console.error("Admin Stats Error:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Failed to load admin statistics",
+        });
+      }
+    }
+  );
+
+  // -------------------------------------
+  // Admin: All registered users
+  // -------------------------------------
+
+  app.get(
+    "/api/admin/users",
+    verifyToken,
+    verifyAdmin,
+    async (req, res) => {
+      try {
+        const { usersCollection } = getCollections();
+
+        const { search = "", role = "" } = req.query;
+
+        const query = {};
+
+        if (isValidRole(role)) {
+          query.role = String(role);
+        }
+
+        const trimmed = String(search).trim();
+
+        if (trimmed) {
+          const pattern = new RegExp(escapeRegex(trimmed), "i");
+
+          query.$or = [{ name: pattern }, { email: pattern }];
+        }
+
+        const users = await usersCollection
+          .find(query, {
+            projection: {
+              name: 1,
+              email: 1,
+              image: 1,
+              role: 1,
+              phone: 1,
+              bio: 1,
+              subscriptionPlan: 1,
+              plan: 1,
+              createdAt: 1,
+            },
+          })
+          .sort({ createdAt: -1 })
+          .limit(500)
+          .toArray();
+
+        return res.status(200).json({
+          success: true,
+          count: users.length,
+          data: users,
+        });
+      } catch (error) {
+        console.error("Admin Users Error:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Failed to load users",
+        });
+      }
+    }
+  );
+
+  // -------------------------------------
+  // Admin: Update a user's role
+  // -------------------------------------
+
+  app.patch(
+    "/api/admin/users/:id/role",
+    verifyToken,
+    verifyAdmin,
+    async (req, res) => {
+      try {
+        const { usersCollection } = getCollections();
+
+        const { id } = req.params;
+        const { role } = req.body || {};
+
+        if (!isValidRole(role)) {
+          return res.status(400).json({
+            success: false,
+            message: "Role must be student, tutor or admin",
+          });
+        }
+
+        if (String(id) === String(req.user.id)) {
+          return res.status(400).json({
+            success: false,
+            message: "You cannot change your own role",
+          });
+        }
+
+        const filter = buildIdFilter(id);
+
+        const user = await usersCollection.findOne(filter);
+
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            message: "User not found",
+          });
+        }
+
+        await usersCollection.updateOne(filter, {
+          $set: {
+            role: String(role),
+            updatedAt: new Date(),
+          },
+        });
+
+        return res.status(200).json({
+          success: true,
+          message: `Role updated to ${role}`,
+          data: {
+            ...user,
+            role: String(role),
+          },
+        });
+      } catch (error) {
+        console.error("Admin Role Update Error:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Failed to update user role",
+        });
+      }
+    }
+  );
+
+  // -------------------------------------
+  // Admin: All tuition posts (moderation)
+  // -------------------------------------
+
+  app.get(
+    "/api/admin/tuitions",
+    verifyToken,
+    verifyAdmin,
+    async (req, res) => {
+      try {
+        const { tuitionsCollection } = getCollections();
+
+        const { status = "", search = "" } = req.query;
+
+        const query = {};
+
+        if (["pending", "approved", "rejected"].includes(String(status))) {
+          query.approvalStatus = String(status);
+        }
+
+        const trimmed = String(search).trim();
+
+        if (trimmed) {
+          const pattern = new RegExp(escapeRegex(trimmed), "i");
+
+          query.$or = [
+            { title: pattern },
+            { subject: pattern },
+            { tutorName: pattern },
+            { tutorEmail: pattern },
+          ];
+        }
+
+        const tuitions = await tuitionsCollection
+          .find(query)
+          .sort({ createdAt: -1 })
+          .limit(500)
+          .toArray();
+
+        return res.status(200).json({
+          success: true,
+          count: tuitions.length,
+          data: tuitions,
+        });
+      } catch (error) {
+        console.error("Admin Tuitions Error:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Failed to load tuitions",
+        });
+      }
+    }
+  );
+
+  // -------------------------------------
+  // Admin: Approve / Reject a tuition
+  // -------------------------------------
+
+  app.patch(
+    "/api/admin/tuitions/:id/approval",
+    verifyToken,
+    verifyAdmin,
+    async (req, res) => {
+      try {
+        const { tuitionsCollection } = getCollections();
+
+        const { id } = req.params;
+        const { approvalStatus } = req.body || {};
+
+        if (!["approved", "rejected"].includes(String(approvalStatus))) {
+          return res.status(400).json({
+            success: false,
+            message: "Approval status must be approved or rejected",
+          });
+        }
+
+        const filter = buildIdFilter(id);
+
+        const tuition = await tuitionsCollection.findOne(filter);
+
+        if (!tuition) {
+          return res.status(404).json({
+            success: false,
+            message: "Tuition not found",
+          });
+        }
+
+        await tuitionsCollection.updateOne(filter, {
+          $set: {
+            approvalStatus: String(approvalStatus),
+            updatedAt: new Date(),
+            reviewedAt: new Date(),
+            reviewedBy: req.user.email,
+          },
+        });
+
+        return res.status(200).json({
+          success: true,
+          message:
+            approvalStatus === "approved"
+              ? "Tuition approved successfully"
+              : "Tuition rejected",
+          data: {
+            ...tuition,
+            approvalStatus: String(approvalStatus),
+          },
+        });
+      } catch (error) {
+        console.error("Admin Tuition Approval Error:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Failed to update tuition approval status",
+        });
+      }
+    }
+  );
+
+  // -------------------------------------
+  // Admin: Stripe payment records
+  // -------------------------------------
+
+  app.get(
+    "/api/admin/payments",
+    verifyToken,
+    verifyAdmin,
+    async (req, res) => {
+      try {
+        const { paymentsCollection } = getCollections();
+
+        const { search = "" } = req.query;
+
+        const query = {};
+
+        const trimmed = String(search).trim();
+
+        if (trimmed) {
+          const pattern = new RegExp(escapeRegex(trimmed), "i");
+
+          query.$or = [
+            { userName: pattern },
+            { userEmail: pattern },
+            { transactionId: pattern },
+            { planName: pattern },
+          ];
+        }
+
+        const payments = await paymentsCollection
+          .find(query)
+          .sort({ paidAt: -1, createdAt: -1 })
+          .limit(1000)
+          .toArray();
+
+        return res.status(200).json({
+          success: true,
+          count: payments.length,
+          data: payments,
+        });
+      } catch (error) {
+        console.error("Admin Payments Error:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Failed to load payments",
+        });
+      }
+    }
+  );
+
+  // -------------------------------------
   // Get logged-in user's profile
   // -------------------------------------
 

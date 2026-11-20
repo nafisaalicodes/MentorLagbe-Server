@@ -1,16 +1,18 @@
-
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import multer from "multer";
+import Stripe from "stripe";
 import {
   MongoClient,
   ServerApiVersion,
   ObjectId,
 } from "mongodb";
 
+
 import { toNodeHandler } from "better-auth/node";
 import { createAuth } from "./auth.js";
+
 
 import {
   verifyToken,
@@ -19,17 +21,22 @@ import {
   verifyAdmin,
 } from "./authMiddleware.js";
 
+
 dotenv.config();
 
+
 const app = express();
+
 
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = process.env.DB_NAME || "MentorLagbe";
 
+
 // -------------------------------------
 // Middleware
 // -------------------------------------
+
 
 app.use(
   cors({
@@ -39,6 +46,7 @@ app.use(
   })
 );
 
+
 const client = new MongoClient(MONGODB_URI || "", {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -47,23 +55,31 @@ const client = new MongoClient(MONGODB_URI || "", {
   },
 });
 
+
 let db;
+let stripe;
+
 
 const connectDB = async () => {
   await client.connect();
 
+
   db = client.db(DB_NAME);
 
+
   await db.command({ ping: 1 });
+
 
   console.log("MongoDB Connected Successfully!");
   console.log(`Database: ${DB_NAME}`);
 };
 
+
 const getCollections = () => {
   if (!db) {
     throw new Error("Database is not connected");
   }
+
 
   return {
     usersCollection: db.collection("users"),
@@ -73,9 +89,11 @@ const getCollections = () => {
   };
 };
 
+
 // -------------------------------------
 // Multer Image Upload Configuration
 // -------------------------------------
+
 
 const allowedMimeTypes = [
   "image/jpeg",
@@ -83,12 +101,15 @@ const allowedMimeTypes = [
   "image/webp",
 ];
 
+
 const imageUpload = multer({
   storage: multer.memoryStorage(),
+
 
   limits: {
     fileSize: 5 * 1024 * 1024,
   },
+
 
   fileFilter: (req, file, callback) => {
     if (!allowedMimeTypes.includes(file.mimetype)) {
@@ -97,29 +118,36 @@ const imageUpload = multer({
       );
     }
 
+
     callback(null, true);
   },
 });
 
+
 // -------------------------------------
 // Upload Image to ImgBB
 // -------------------------------------
+
 
 const uploadToImgBB = async (file) => {
   if (!process.env.IMGBB_API_KEY) {
     throw new Error("IMGBB_API_KEY is missing in backend .env");
   }
 
+
   if (!file) {
     throw new Error("Please select an image.");
   }
 
+
   const formData = new FormData();
+
 
   formData.append(
     "image",
     file.buffer.toString("base64")
   );
+
 
   const response = await fetch(
     `https://api.imgbb.com/1/upload?key=${encodeURIComponent(
@@ -131,39 +159,49 @@ const uploadToImgBB = async (file) => {
     }
   );
 
+
   const result = await response.json();
+
 
   if (!response.ok || !result.success || !result.data?.url) {
     console.error("ImgBB Upload Error:", result);
+
 
     throw new Error(
       result.error?.message || "Image upload failed."
     );
   }
 
+
   return result.data.url;
 };
+
 
 // -------------------------------------
 // API Routes
 // -------------------------------------
+
 
 const registerApiRoutes = () => {
   // -------------------------------------
   // Root API
   // -------------------------------------
 
+
   app.get("/", (req, res) => {
     res.send("MentorLagbe Server is Running!");
   });
+
 
   // -------------------------------------
   // Health API
   // -------------------------------------
 
+
   app.get("/api/health", async (req, res) => {
     try {
       await db.command({ ping: 1 });
+
 
       return res.status(200).json({
         success: true,
@@ -172,6 +210,7 @@ const registerApiRoutes = () => {
     } catch (error) {
       console.error("Health Check Error:", error);
 
+
       return res.status(500).json({
         success: false,
         message: "Database connection error",
@@ -179,13 +218,16 @@ const registerApiRoutes = () => {
     }
   });
 
+
   // -------------------------------------
   // Public: Latest approved tuitions
   // -------------------------------------
 
+
   app.get("/api/tuitions", async (req, res) => {
     try {
       const { tuitionsCollection } = getCollections();
+
 
       const tuitions = await tuitionsCollection
         .find({
@@ -196,6 +238,7 @@ const registerApiRoutes = () => {
         .limit(6)
         .toArray();
 
+
       return res.status(200).json({
         success: true,
         count: tuitions.length,
@@ -204,6 +247,7 @@ const registerApiRoutes = () => {
     } catch (error) {
       console.error("Fetch Tuitions Error:", error);
 
+
       return res.status(500).json({
         success: false,
         message: "Failed to fetch tuitions",
@@ -211,13 +255,16 @@ const registerApiRoutes = () => {
     }
   });
 
+
   // -------------------------------------
   // Public: Browse tuitions
   // -------------------------------------
 
+
   app.get("/api/tuitions/browse", async (req, res) => {
     try {
       const { tuitionsCollection } = getCollections();
+
 
       const {
         search = "",
@@ -226,15 +273,18 @@ const registerApiRoutes = () => {
         mode = "",
       } = req.query;
 
+
       const query = {
         approvalStatus: "approved",
         isActive: true,
       };
 
+
       if (typeof search === "string" && search.trim()) {
         const safeSearch = search
           .trim()
           .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 
         query.$or = [
           { title: { $regex: safeSearch, $options: "i" } },
@@ -242,13 +292,16 @@ const registerApiRoutes = () => {
         ];
       }
 
+
       if (typeof subject === "string" && subject.trim()) {
         query.subject = subject.trim();
       }
 
+
       if (typeof classLevel === "string" && classLevel.trim()) {
         query.classLevel = classLevel.trim();
       }
+
 
       if (
         typeof mode === "string" &&
@@ -257,10 +310,12 @@ const registerApiRoutes = () => {
         query.mode = mode;
       }
 
+
       const tuitions = await tuitionsCollection
         .find(query)
         .sort({ createdAt: -1 })
         .toArray();
+
 
       return res.status(200).json({
         success: true,
@@ -270,6 +325,7 @@ const registerApiRoutes = () => {
     } catch (error) {
       console.error("Browse Tuitions Error:", error);
 
+
       return res.status(500).json({
         success: false,
         message: "Failed to fetch tuition listings",
@@ -277,13 +333,16 @@ const registerApiRoutes = () => {
     }
   });
 
+
   // -------------------------------------
   // Public: Get tuition details by ID
   // -------------------------------------
 
+
   app.get("/api/tuitions/:id", async (req, res) => {
     try {
       const { id } = req.params;
+
 
       if (!ObjectId.isValid(id)) {
         return res.status(400).json({
@@ -292,13 +351,16 @@ const registerApiRoutes = () => {
         });
       }
 
+
       const { tuitionsCollection } = getCollections();
+
 
       const tuition = await tuitionsCollection.findOne({
         _id: new ObjectId(id),
         approvalStatus: "approved",
         isActive: true,
       });
+
 
       if (!tuition) {
         return res.status(404).json({
@@ -307,12 +369,14 @@ const registerApiRoutes = () => {
         });
       }
 
+
       return res.status(200).json({
         success: true,
         data: tuition,
       });
     } catch (error) {
       console.error("Get Tuition Details Error:", error);
+
 
       return res.status(500).json({
         success: false,
@@ -321,9 +385,11 @@ const registerApiRoutes = () => {
     }
   });
 
+
   // -------------------------------------
   // Student: Apply for a tuition
   // -------------------------------------
+
 
   app.post(
     "/api/applications",
@@ -338,6 +404,7 @@ const registerApiRoutes = () => {
           studentNote = "",
         } = req.body || {};
 
+
         if (
           typeof tuitionId !== "string" ||
           !ObjectId.isValid(tuitionId)
@@ -348,9 +415,11 @@ const registerApiRoutes = () => {
           });
         }
 
+
         const studentEmail = req.user.email
           ?.trim()
           .toLowerCase();
+
 
         if (!studentEmail) {
           return res.status(401).json({
@@ -358,6 +427,7 @@ const registerApiRoutes = () => {
             message: "Student email is missing from authentication",
           });
         }
+
 
         if (
           typeof studentPhone !== "string" ||
@@ -370,6 +440,7 @@ const registerApiRoutes = () => {
           });
         }
 
+
         if (
           typeof preferredSchedule !== "string" ||
           preferredSchedule.trim().length < 2 ||
@@ -381,6 +452,7 @@ const registerApiRoutes = () => {
           });
         }
 
+
         if (
           typeof studentNote !== "string" ||
           studentNote.trim().length > 1000
@@ -391,13 +463,16 @@ const registerApiRoutes = () => {
           });
         }
 
+
         const {
           usersCollection,
           tuitionsCollection,
           applicationsCollection,
         } = getCollections();
 
+
         const tuitionObjectId = new ObjectId(tuitionId);
+
 
         const tuition = await tuitionsCollection.findOne({
           _id: tuitionObjectId,
@@ -405,12 +480,14 @@ const registerApiRoutes = () => {
           isActive: true,
         });
 
+
         if (!tuition) {
           return res.status(404).json({
             success: false,
             message: "This tuition is no longer available",
           });
         }
+
 
         // Check both ObjectId and older string-format records.
         const existingApplication =
@@ -422,6 +499,7 @@ const registerApiRoutes = () => {
             ],
           });
 
+
         if (existingApplication) {
           return res.status(409).json({
             success: false,
@@ -429,9 +507,11 @@ const registerApiRoutes = () => {
           });
         }
 
+
         const student = await usersCollection.findOne({
           email: studentEmail,
         });
+
 
         const application = {
           tuitionId: tuitionObjectId,
@@ -440,20 +520,25 @@ const registerApiRoutes = () => {
           monthlyFee: Number(tuition.monthlyFee) || 0,
           tutorEmail: tuition.tutorEmail || "",
 
+
           studentName: student?.name || "",
           studentEmail,
           studentPhone: studentPhone.trim(),
 
+
           preferredSchedule: preferredSchedule.trim(),
           studentNote: studentNote.trim(),
+
 
           status: "pending",
           appliedAt: new Date(),
         };
 
+
         const result = await applicationsCollection.insertOne(
           application
         );
+
 
         return res.status(201).json({
           success: true,
@@ -463,6 +548,7 @@ const registerApiRoutes = () => {
       } catch (error) {
         console.error("Submit Application Error:", error);
 
+
         return res.status(500).json({
           success: false,
           message: "Failed to submit application",
@@ -471,13 +557,16 @@ const registerApiRoutes = () => {
     }
   );
 
+
   // =====================================
   // STUDENT DASHBOARD ROUTES
   // =====================================
 
+
   // -------------------------------------
   // A. Student Dashboard: Overview Stats
   // -------------------------------------
+
 
   app.get(
     "/api/student/dashboard/stats",
@@ -490,7 +579,9 @@ const registerApiRoutes = () => {
           usersCollection,
         } = getCollections();
 
+
         const email = req.user.email?.trim().toLowerCase();
+
 
         if (!email) {
           return res.status(401).json({
@@ -499,32 +590,40 @@ const registerApiRoutes = () => {
           });
         }
 
+
         const applications = await applicationsCollection
           .find({ studentEmail: email })
           .toArray();
 
+
         const totalApplied = applications.length;
+
 
         const accepted = applications.filter(
           (item) => item.status === "accepted"
         ).length;
 
+
         const pending = applications.filter(
           (item) => item.status === "pending"
         ).length;
+
 
         const rejected = applications.filter(
           (item) => item.status === "rejected"
         ).length;
 
+
         const user = await usersCollection.findOne({
           email,
         });
+
 
         const plan =
           user?.subscriptionPlan ||
           user?.plan ||
           "free";
+
 
         return res.status(200).json({
           success: true,
@@ -542,6 +641,7 @@ const registerApiRoutes = () => {
       } catch (error) {
         console.error("Student Dashboard Stats Error:", error);
 
+
         return res.status(500).json({
           success: false,
           message: "Failed to load dashboard statistics",
@@ -550,9 +650,11 @@ const registerApiRoutes = () => {
     }
   );
 
+
   // -------------------------------------
   // B. Student Dashboard: My Applications
   // -------------------------------------
+
 
   app.get(
     "/api/student/applications",
@@ -562,7 +664,9 @@ const registerApiRoutes = () => {
       try {
         const { applicationsCollection } = getCollections();
 
+
         const email = req.user.email?.trim().toLowerCase();
+
 
         if (!email) {
           return res.status(401).json({
@@ -570,6 +674,7 @@ const registerApiRoutes = () => {
             message: "Student email is missing",
           });
         }
+
 
         const applications = await applicationsCollection
           .aggregate([
@@ -617,12 +722,14 @@ const registerApiRoutes = () => {
                 _id: 1,
                 tuitionId: 1,
 
+
                 tuitionTitle: {
                   $ifNull: [
                     "$tuitionTitle",
                     "$tuitionInfo.title",
                   ],
                 },
+
 
                 subject: {
                   $ifNull: [
@@ -631,12 +738,14 @@ const registerApiRoutes = () => {
                   ],
                 },
 
+
                 tutorName: {
                   $ifNull: [
                     "$tuitionInfo.tutorName",
                     "MentorLagbe Tutor",
                   ],
                 },
+
 
                 tutorEmail: {
                   $ifNull: [
@@ -645,12 +754,14 @@ const registerApiRoutes = () => {
                   ],
                 },
 
+
                 monthlyFee: {
                   $ifNull: [
                     "$monthlyFee",
                     "$tuitionInfo.monthlyFee",
                   ],
                 },
+
 
                 status: 1,
                 appliedAt: 1,
@@ -665,6 +776,7 @@ const registerApiRoutes = () => {
           ])
           .toArray();
 
+
         return res.status(200).json({
           success: true,
           count: applications.length,
@@ -672,6 +784,7 @@ const registerApiRoutes = () => {
         });
       } catch (error) {
         console.error("My Applications Error:", error);
+
 
         return res.status(500).json({
           success: false,
@@ -681,9 +794,11 @@ const registerApiRoutes = () => {
     }
   );
 
+
   // -------------------------------------
   // C. Student Dashboard: Cancel Application
   // -------------------------------------
+
 
   app.delete(
     "/api/student/applications/:id",
@@ -694,6 +809,7 @@ const registerApiRoutes = () => {
         const { applicationsCollection } = getCollections();
         const { id } = req.params;
 
+
         if (!ObjectId.isValid(id)) {
           return res.status(400).json({
             success: false,
@@ -701,7 +817,9 @@ const registerApiRoutes = () => {
           });
         }
 
+
         const email = req.user.email?.trim().toLowerCase();
+
 
         if (!email) {
           return res.status(401).json({
@@ -710,11 +828,13 @@ const registerApiRoutes = () => {
           });
         }
 
+
         const result = await applicationsCollection.deleteOne({
           _id: new ObjectId(id),
           studentEmail: email,
           status: "pending",
         });
+
 
         if (result.deletedCount === 0) {
           return res.status(404).json({
@@ -724,12 +844,14 @@ const registerApiRoutes = () => {
           });
         }
 
+
         return res.status(200).json({
           success: true,
           message: "Application cancelled successfully",
         });
       } catch (error) {
         console.error("Cancel Application Error:", error);
+
 
         return res.status(500).json({
           success: false,
@@ -739,13 +861,16 @@ const registerApiRoutes = () => {
     }
   );
 
+
   // =====================================
 // TUTOR DASHBOARD ROUTES
 // =====================================
 
+
 // -------------------------------------
 // A. Tutor Dashboard Overview Stats
 // -------------------------------------
+
 
 app.get(
   "/api/tutor/dashboard/stats",
@@ -759,7 +884,9 @@ app.get(
         applicationsCollection,
       } = getCollections();
 
+
       const email = req.user.email?.trim().toLowerCase();
+
 
       if (!email) {
         return res.status(401).json({
@@ -768,21 +895,26 @@ app.get(
         });
       }
 
+
       const user = await usersCollection.findOne({ email });
+
 
       const plan = String(
         user?.subscriptionPlan || user?.plan || "free"
       ).toLowerCase();
 
+
       const totalTuitions = await tuitionsCollection.countDocuments({
         tutorEmail: email,
       });
+
 
       const activeTuitions = await tuitionsCollection.countDocuments({
         tutorEmail: email,
         approvalStatus: "approved",
         isActive: true,
       });
+
 
       const ownedTuitions = await tuitionsCollection
         .find(
@@ -791,8 +923,10 @@ app.get(
         )
         .toArray();
 
+
       const tuitionIds = ownedTuitions.map((item) => item._id);
       const tuitionStringIds = tuitionIds.map((id) => id.toString());
+
 
       const totalApplicants =
         await applicationsCollection.countDocuments({
@@ -802,6 +936,7 @@ app.get(
             { tuitionId: { $in: tuitionStringIds } },
           ],
         });
+
 
       return res.status(200).json({
         success: true,
@@ -820,6 +955,7 @@ app.get(
     } catch (error) {
       console.error("Tutor Dashboard Stats Error:", error);
 
+
       return res.status(500).json({
         success: false,
         message: "Failed to load tutor dashboard statistics",
@@ -828,9 +964,11 @@ app.get(
   }
 );
 
+
 // -------------------------------------
 // B. Tutor: Create New Tuition
 // -------------------------------------
+
 
 app.post(
   "/api/tutor/tuitions",
@@ -843,7 +981,9 @@ app.post(
         tuitionsCollection,
       } = getCollections();
 
+
       const email = req.user.email?.trim().toLowerCase();
+
 
       if (!email) {
         return res.status(401).json({
@@ -851,6 +991,7 @@ app.post(
           message: "Tutor email is missing",
         });
       }
+
 
       const {
         title,
@@ -864,6 +1005,7 @@ app.post(
         bannerUrl,
       } = req.body || {};
 
+
       if (
         typeof title !== "string" ||
         title.trim().length < 5 ||
@@ -875,12 +1017,14 @@ app.post(
         });
       }
 
+
       if (typeof subject !== "string" || !subject.trim()) {
         return res.status(400).json({
           success: false,
           message: "Subject is required",
         });
       }
+
 
       if (typeof classLevel !== "string" || !classLevel.trim()) {
         return res.status(400).json({
@@ -889,12 +1033,14 @@ app.post(
         });
       }
 
+
       if (!["Online", "Offline"].includes(mode)) {
         return res.status(400).json({
           success: false,
           message: "Mode must be Online or Offline",
         });
       }
+
 
       if (
         typeof location !== "string" ||
@@ -907,8 +1053,10 @@ app.post(
         });
       }
 
+
       const fee = Number(monthlyFee);
       const days = Number(daysPerWeek);
+
 
       if (
         !Number.isFinite(fee) ||
@@ -921,12 +1069,14 @@ app.post(
         });
       }
 
+
       if (!Number.isInteger(days) || days < 1 || days > 7) {
         return res.status(400).json({
           success: false,
           message: "Days per week must be between 1 and 7",
         });
       }
+
 
       if (
         typeof description !== "string" ||
@@ -939,6 +1089,7 @@ app.post(
         });
       }
 
+
       if (
         typeof bannerUrl !== "string" ||
         !/^https:\/\/.+/i.test(bannerUrl.trim())
@@ -949,7 +1100,9 @@ app.post(
         });
       }
 
+
       const user = await usersCollection.findOne({ email });
+
 
       if (!user) {
         return res.status(404).json({
@@ -958,15 +1111,19 @@ app.post(
         });
       }
 
+
       const plan = String(
         user.subscriptionPlan || user.plan || "free"
       ).toLowerCase();
+
 
       const totalPosts = await tuitionsCollection.countDocuments({
         tutorEmail: email,
       });
 
+
       // Free Plan: Maximum 2 tuition posts
+
 
       if (plan !== "pro" && totalPosts >= 2) {
         return res.status(403).json({
@@ -976,6 +1133,7 @@ app.post(
             "Free Plan allows only 2 tuition posts. Upgrade to Pro for unlimited posts.",
         });
       }
+
 
       const tuition = {
         title: title.trim(),
@@ -988,18 +1146,23 @@ app.post(
         description: description.trim(),
         bannerUrl: bannerUrl.trim(),
 
+
         tutorId: req.user.id,
         tutorName: user.name || "Tutor",
         tutorEmail: email,
 
+
         approvalStatus: "pending",
         isActive: true,
+
 
         createdAt: new Date(),
         updatedAt: new Date(),
       };
 
+
       const result = await tuitionsCollection.insertOne(tuition);
+
 
       return res.status(201).json({
         success: true,
@@ -1012,6 +1175,7 @@ app.post(
     } catch (error) {
       console.error("Create Tuition Error:", error);
 
+
       return res.status(500).json({
         success: false,
         message: "Failed to create tuition",
@@ -1019,6 +1183,7 @@ app.post(
     }
   }
 );
+
 
 // -------------------------------------
 // C. Tutor: Get My Tuitions
@@ -1079,7 +1244,9 @@ app.get(
           {
             $addFields: {
               applicantsCount: {
-                $size: "$applications",
+                $size: {
+                  $ifNull: ["$applications", []],
+                },
               },
             },
           },
@@ -1112,9 +1279,12 @@ app.get(
   }
 );
 
+
+
 // -------------------------------------
 // D. Tutor: Update Tuition
 // -------------------------------------
+
 
 app.patch(
   "/api/tutor/tuitions/:id",
@@ -1125,6 +1295,7 @@ app.patch(
       const { tuitionsCollection } = getCollections();
       const { id } = req.params;
 
+
       if (!ObjectId.isValid(id)) {
         return res.status(400).json({
           success: false,
@@ -1132,7 +1303,9 @@ app.patch(
         });
       }
 
+
       const email = req.user.email?.trim().toLowerCase();
+
 
       const allowedFields = [
         "title",
@@ -1146,7 +1319,9 @@ app.patch(
         "bannerUrl",
       ];
 
+
       const updateData = {};
+
 
       for (const field of allowedFields) {
         if (req.body?.[field] !== undefined) {
@@ -1154,12 +1329,14 @@ app.patch(
         }
       }
 
+
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({
           success: false,
           message: "No valid fields provided for update",
         });
       }
+
 
       if (
         updateData.title !== undefined &&
@@ -1173,6 +1350,7 @@ app.patch(
         });
       }
 
+
       if (
         updateData.subject !== undefined &&
         (typeof updateData.subject !== "string" ||
@@ -1183,6 +1361,7 @@ app.patch(
           message: "Invalid subject",
         });
       }
+
 
       if (
         updateData.classLevel !== undefined &&
@@ -1195,6 +1374,7 @@ app.patch(
         });
       }
 
+
       if (
         updateData.mode !== undefined &&
         !["Online", "Offline"].includes(updateData.mode)
@@ -1204,6 +1384,7 @@ app.patch(
           message: "Invalid tuition mode",
         });
       }
+
 
       if (
         updateData.location !== undefined &&
@@ -1217,8 +1398,10 @@ app.patch(
         });
       }
 
+
       if (updateData.monthlyFee !== undefined) {
         const fee = Number(updateData.monthlyFee);
+
 
         if (!Number.isFinite(fee) || fee < 1 || fee > 1000000) {
           return res.status(400).json({
@@ -1227,11 +1410,14 @@ app.patch(
           });
         }
 
+
         updateData.monthlyFee = fee;
       }
 
+
       if (updateData.daysPerWeek !== undefined) {
         const days = Number(updateData.daysPerWeek);
+
 
         if (!Number.isInteger(days) || days < 1 || days > 7) {
           return res.status(400).json({
@@ -1240,8 +1426,10 @@ app.patch(
           });
         }
 
+
         updateData.daysPerWeek = days;
       }
+
 
       if (updateData.description !== undefined) {
         if (
@@ -1256,6 +1444,7 @@ app.patch(
         }
       }
 
+
       if (updateData.bannerUrl !== undefined) {
         if (
           typeof updateData.bannerUrl !== "string" ||
@@ -1267,6 +1456,7 @@ app.patch(
           });
         }
       }
+
 
       for (const field of [
         "title",
@@ -1281,7 +1471,9 @@ app.patch(
         }
       }
 
+
       updateData.updatedAt = new Date();
+
 
       const result = await tuitionsCollection.updateOne(
         {
@@ -1293,6 +1485,7 @@ app.patch(
         }
       );
 
+
       if (result.matchedCount === 0) {
         return res.status(404).json({
           success: false,
@@ -1300,12 +1493,14 @@ app.patch(
         });
       }
 
+
       return res.status(200).json({
         success: true,
         message: "Tuition updated successfully",
       });
     } catch (error) {
       console.error("Update Tuition Error:", error);
+
 
       return res.status(500).json({
         success: false,
@@ -1315,9 +1510,11 @@ app.patch(
   }
 );
 
+
 // -------------------------------------
 // E. Tutor: Delete Tuition
 // -------------------------------------
+
 
 app.delete(
   "/api/tutor/tuitions/:id",
@@ -1330,7 +1527,9 @@ app.delete(
         applicationsCollection,
       } = getCollections();
 
+
       const { id } = req.params;
+
 
       if (!ObjectId.isValid(id)) {
         return res.status(400).json({
@@ -1339,13 +1538,16 @@ app.delete(
         });
       }
 
+
       const email = req.user.email?.trim().toLowerCase();
       const tuitionObjectId = new ObjectId(id);
+
 
       const tuition = await tuitionsCollection.findOne({
         _id: tuitionObjectId,
         tutorEmail: email,
       });
+
 
       if (!tuition) {
         return res.status(404).json({
@@ -1354,8 +1556,10 @@ app.delete(
         });
       }
 
+
       // Delete related applications first.
       // This version also works with standalone local MongoDB.
+
 
       await applicationsCollection.deleteMany({
         $or: [
@@ -1364,10 +1568,12 @@ app.delete(
         ],
       });
 
+
       await tuitionsCollection.deleteOne({
         _id: tuitionObjectId,
         tutorEmail: email,
       });
+
 
       return res.status(200).json({
         success: true,
@@ -1375,6 +1581,7 @@ app.delete(
       });
     } catch (error) {
       console.error("Delete Tuition Error:", error);
+
 
       return res.status(500).json({
         success: false,
@@ -1384,9 +1591,11 @@ app.delete(
   }
 );
 
+
 // -------------------------------------
 // F. Tutor: Toggle Tuition Active Status
 // -------------------------------------
+
 
 app.patch(
   "/api/tutor/tuitions/:id/status",
@@ -1396,8 +1605,10 @@ app.patch(
     try {
       const { tuitionsCollection } = getCollections();
 
+
       const { id } = req.params;
       const { isActive } = req.body || {};
+
 
       if (!ObjectId.isValid(id)) {
         return res.status(400).json({
@@ -1406,6 +1617,7 @@ app.patch(
         });
       }
 
+
       if (typeof isActive !== "boolean") {
         return res.status(400).json({
           success: false,
@@ -1413,7 +1625,9 @@ app.patch(
         });
       }
 
+
       const email = req.user.email?.trim().toLowerCase();
+
 
       const result = await tuitionsCollection.updateOne(
         {
@@ -1428,6 +1642,7 @@ app.patch(
         }
       );
 
+
       if (result.matchedCount === 0) {
         return res.status(404).json({
           success: false,
@@ -1435,12 +1650,14 @@ app.patch(
         });
       }
 
+
       return res.status(200).json({
         success: true,
         message: `Tuition ${isActive ? "activated" : "closed"} successfully`,
       });
     } catch (error) {
       console.error("Toggle Tuition Status Error:", error);
+
 
       return res.status(500).json({
         success: false,
@@ -1450,9 +1667,11 @@ app.patch(
   }
 );
 
+
 // -------------------------------------
 // G. Tutor: Get All Applicants
 // -------------------------------------
+
 
 app.get(
   "/api/tutor/applicants",
@@ -1465,7 +1684,9 @@ app.get(
         applicationsCollection,
       } = getCollections();
 
+
       const email = req.user.email?.trim().toLowerCase();
+
 
       if (!email) {
         return res.status(401).json({
@@ -1473,6 +1694,7 @@ app.get(
           message: "Tutor email is missing",
         });
       }
+
 
       const myTuitions = await tuitionsCollection
         .find(
@@ -1486,8 +1708,10 @@ app.get(
         )
         .toArray();
 
+
       const tuitionIds = myTuitions.map((item) => item._id);
       const tuitionStringIds = tuitionIds.map((id) => id.toString());
+
 
       const applicants = await applicationsCollection
         .aggregate([
@@ -1544,12 +1768,14 @@ app.get(
               _id: 1,
               tuitionId: 1,
 
+
               tuitionTitle: {
                 $ifNull: [
                   "$tuitionTitle",
                   "$tuitionInfo.title",
                 ],
               },
+
 
               studentName: 1,
               studentEmail: 1,
@@ -1568,6 +1794,7 @@ app.get(
         ])
         .toArray();
 
+
       return res.status(200).json({
         success: true,
         count: applicants.length,
@@ -1575,6 +1802,7 @@ app.get(
       });
     } catch (error) {
       console.error("Tutor Applicants Error:", error);
+
 
       return res.status(500).json({
         success: false,
@@ -1584,9 +1812,11 @@ app.get(
   }
 );
 
+
 // -------------------------------------
 // H. Tutor: Accept / Reject Applicant
 // -------------------------------------
+
 
 app.patch(
   "/api/tutor/applicants/:id/status",
@@ -1599,8 +1829,10 @@ app.patch(
         tuitionsCollection,
       } = getCollections();
 
+
       const { id } = req.params;
       const { status } = req.body || {};
+
 
       if (!ObjectId.isValid(id)) {
         return res.status(400).json({
@@ -1609,6 +1841,7 @@ app.patch(
         });
       }
 
+
       if (!["accepted", "rejected"].includes(status)) {
         return res.status(400).json({
           success: false,
@@ -1616,11 +1849,14 @@ app.patch(
         });
       }
 
+
       const email = req.user.email?.trim().toLowerCase();
+
 
       const application = await applicationsCollection.findOne({
         _id: new ObjectId(id),
       });
+
 
       if (!application) {
         return res.status(404).json({
@@ -1629,7 +1865,9 @@ app.patch(
         });
       }
 
+
       const tuitionId = application.tuitionId;
+
 
       const tuition = await tuitionsCollection.findOne({
         _id: ObjectId.isValid(String(tuitionId))
@@ -1638,12 +1876,14 @@ app.patch(
         tutorEmail: email,
       });
 
+
       if (!tuition) {
         return res.status(403).json({
           success: false,
           message: "You are not authorized to manage this application",
         });
       }
+
 
       const result = await applicationsCollection.updateOne(
         {
@@ -1657,6 +1897,7 @@ app.patch(
         }
       );
 
+
       if (result.matchedCount === 0) {
         return res.status(404).json({
           success: false,
@@ -1664,12 +1905,14 @@ app.patch(
         });
       }
 
+
       return res.status(200).json({
         success: true,
         message: `Application ${status} successfully`,
       });
     } catch (error) {
       console.error("Update Applicant Status Error:", error);
+
 
       return res.status(500).json({
         success: false,
@@ -1679,13 +1922,16 @@ app.patch(
   }
 );
 
+
   // =====================================
   // PROFILE & IMAGE ROUTES
   // =====================================
 
+
   // -------------------------------------
   // Protected: Upload profile picture
   // -------------------------------------
+
 
   app.post(
     "/api/profile/upload-image",
@@ -1700,7 +1946,9 @@ app.patch(
           });
         }
 
+
         const imageUrl = await uploadToImgBB(req.file);
+
 
         return res.status(200).json({
           success: true,
@@ -1710,6 +1958,7 @@ app.patch(
       } catch (error) {
         console.error("Profile Image Upload Error:", error);
 
+
         return res.status(500).json({
           success: false,
           message: error.message || "Profile image upload failed.",
@@ -1718,9 +1967,11 @@ app.patch(
     }
   );
 
+
   // -------------------------------------
   // Protected: Upload tuition banner
   // -------------------------------------
+
 
   app.post(
     "/api/tuitions/upload-banner",
@@ -1733,9 +1984,11 @@ app.patch(
       try {
         const uploadedFiles = req.files || {};
 
+
         const bannerFile =
           uploadedFiles.banner?.[0] ||
           uploadedFiles.image?.[0];
+
 
         if (!bannerFile) {
           return res.status(400).json({
@@ -1744,7 +1997,9 @@ app.patch(
           });
         }
 
+
         const bannerUrl = await uploadToImgBB(bannerFile);
+
 
         return res.status(200).json({
           success: true,
@@ -1754,6 +2009,7 @@ app.patch(
       } catch (error) {
         console.error("Tuition Banner Upload Error:", error);
 
+
         return res.status(500).json({
           success: false,
           message: error.message || "Tuition banner upload failed.",
@@ -1762,9 +2018,11 @@ app.patch(
     }
   );
 
+
   // -------------------------------------
   // Protected: Any logged-in user
   // -------------------------------------
+
 
   app.get("/api/protected", verifyToken, (req, res) => {
     return res.json({
@@ -1774,9 +2032,11 @@ app.patch(
     });
   });
 
+
   // -------------------------------------
   // Student dashboard health route
   // -------------------------------------
+
 
   app.get(
     "/api/student/dashboard",
@@ -1791,9 +2051,11 @@ app.patch(
     }
   );
 
+
   // -------------------------------------
   // Tutor dashboard
   // -------------------------------------
+
 
   app.get(
     "/api/tutor/dashboard",
@@ -1808,9 +2070,11 @@ app.patch(
     }
   );
 
+
   // -------------------------------------
   // Admin dashboard
   // -------------------------------------
+
 
   app.get(
     "/api/admin/dashboard",
@@ -1825,33 +2089,42 @@ app.patch(
     }
   );
 
+
   // -------------------------------------
   // Admin: helpers
   // -------------------------------------
+
 
   // BetterAuth may store _id as string or ObjectId depending on
   // the adapter, so every id lookup matches both shapes.
   const buildIdFilter = (rawId) => {
     const id = String(rawId || "");
 
+
     const conditions = [{ _id: id }];
+
 
     if (ObjectId.isValid(id)) {
       conditions.push({ _id: new ObjectId(id) });
     }
 
+
     return { $or: conditions };
   };
+
 
   const escapeRegex = (value) =>
     String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+
   const isValidRole = (role) =>
     ["student", "tutor", "admin"].includes(String(role));
+
 
   // -------------------------------------
   // Admin: Platform statistics
   // -------------------------------------
+
 
   app.get(
     "/api/admin/stats",
@@ -1865,6 +2138,7 @@ app.patch(
           applicationsCollection,
           paymentsCollection,
         } = getCollections();
+
 
         const [
           totalUsers,
@@ -1894,9 +2168,11 @@ app.patch(
           applicationsCollection.countDocuments(),
         ]);
 
+
         const payments = await paymentsCollection
           .find({})
           .toArray();
+
 
         // Everything that is not explicitly failed/refunded counts
         // as settled revenue (Stripe webhook stores "paid").
@@ -1905,15 +2181,18 @@ app.patch(
             payment.paymentStatus || "paid"
           ).toLowerCase();
 
+
           return !["failed", "refunded", "canceled", "pending"].includes(
             status
           );
         });
 
+
         const totalRevenue = settledPayments.reduce(
           (sum, payment) => sum + (Number(payment.amount) || 0),
           0
         );
+
 
         return res.status(200).json({
           success: true,
@@ -1934,6 +2213,7 @@ app.patch(
       } catch (error) {
         console.error("Admin Stats Error:", error);
 
+
         return res.status(500).json({
           success: false,
           message: "Failed to load admin statistics",
@@ -1942,9 +2222,11 @@ app.patch(
     }
   );
 
+
   // -------------------------------------
   // Admin: All registered users
   // -------------------------------------
+
 
   app.get(
     "/api/admin/users",
@@ -1954,21 +2236,28 @@ app.patch(
       try {
         const { usersCollection } = getCollections();
 
+
         const { search = "", role = "" } = req.query;
 
+
         const query = {};
+
 
         if (isValidRole(role)) {
           query.role = String(role);
         }
 
+
         const trimmed = String(search).trim();
+
 
         if (trimmed) {
           const pattern = new RegExp(escapeRegex(trimmed), "i");
 
+
           query.$or = [{ name: pattern }, { email: pattern }];
         }
+
 
         const users = await usersCollection
           .find(query, {
@@ -1988,6 +2277,7 @@ app.patch(
           .limit(500)
           .toArray();
 
+
         return res.status(200).json({
           success: true,
           count: users.length,
@@ -1995,6 +2285,7 @@ app.patch(
         });
       } catch (error) {
         console.error("Admin Users Error:", error);
+
 
         return res.status(500).json({
           success: false,
@@ -2004,9 +2295,11 @@ app.patch(
     }
   );
 
+
   // -------------------------------------
   // Admin: Update a user's role
   // -------------------------------------
+
 
   app.patch(
     "/api/admin/users/:id/role",
@@ -2016,8 +2309,10 @@ app.patch(
       try {
         const { usersCollection } = getCollections();
 
+
         const { id } = req.params;
         const { role } = req.body || {};
+
 
         if (!isValidRole(role)) {
           return res.status(400).json({
@@ -2026,6 +2321,7 @@ app.patch(
           });
         }
 
+
         if (String(id) === String(req.user.id)) {
           return res.status(400).json({
             success: false,
@@ -2033,9 +2329,12 @@ app.patch(
           });
         }
 
+
         const filter = buildIdFilter(id);
 
+
         const user = await usersCollection.findOne(filter);
+
 
         if (!user) {
           return res.status(404).json({
@@ -2044,12 +2343,14 @@ app.patch(
           });
         }
 
+
         await usersCollection.updateOne(filter, {
           $set: {
             role: String(role),
             updatedAt: new Date(),
           },
         });
+
 
         return res.status(200).json({
           success: true,
@@ -2062,6 +2363,7 @@ app.patch(
       } catch (error) {
         console.error("Admin Role Update Error:", error);
 
+
         return res.status(500).json({
           success: false,
           message: "Failed to update user role",
@@ -2070,9 +2372,11 @@ app.patch(
     }
   );
 
+
   // -------------------------------------
   // Admin: All tuition posts (moderation)
   // -------------------------------------
+
 
   app.get(
     "/api/admin/tuitions",
@@ -2082,18 +2386,24 @@ app.patch(
       try {
         const { tuitionsCollection } = getCollections();
 
+
         const { status = "", search = "" } = req.query;
 
+
         const query = {};
+
 
         if (["pending", "approved", "rejected"].includes(String(status))) {
           query.approvalStatus = String(status);
         }
 
+
         const trimmed = String(search).trim();
+
 
         if (trimmed) {
           const pattern = new RegExp(escapeRegex(trimmed), "i");
+
 
           query.$or = [
             { title: pattern },
@@ -2103,11 +2413,13 @@ app.patch(
           ];
         }
 
+
         const tuitions = await tuitionsCollection
           .find(query)
           .sort({ createdAt: -1 })
           .limit(500)
           .toArray();
+
 
         return res.status(200).json({
           success: true,
@@ -2117,6 +2429,7 @@ app.patch(
       } catch (error) {
         console.error("Admin Tuitions Error:", error);
 
+
         return res.status(500).json({
           success: false,
           message: "Failed to load tuitions",
@@ -2125,9 +2438,11 @@ app.patch(
     }
   );
 
+
   // -------------------------------------
   // Admin: Approve / Reject a tuition
   // -------------------------------------
+
 
   app.patch(
     "/api/admin/tuitions/:id/approval",
@@ -2137,8 +2452,10 @@ app.patch(
       try {
         const { tuitionsCollection } = getCollections();
 
+
         const { id } = req.params;
         const { approvalStatus } = req.body || {};
+
 
         if (!["approved", "rejected"].includes(String(approvalStatus))) {
           return res.status(400).json({
@@ -2147,9 +2464,12 @@ app.patch(
           });
         }
 
+
         const filter = buildIdFilter(id);
 
+
         const tuition = await tuitionsCollection.findOne(filter);
+
 
         if (!tuition) {
           return res.status(404).json({
@@ -2157,6 +2477,7 @@ app.patch(
             message: "Tuition not found",
           });
         }
+
 
         await tuitionsCollection.updateOne(filter, {
           $set: {
@@ -2166,6 +2487,7 @@ app.patch(
             reviewedBy: req.user.email,
           },
         });
+
 
         return res.status(200).json({
           success: true,
@@ -2181,6 +2503,7 @@ app.patch(
       } catch (error) {
         console.error("Admin Tuition Approval Error:", error);
 
+
         return res.status(500).json({
           success: false,
           message: "Failed to update tuition approval status",
@@ -2188,10 +2511,145 @@ app.patch(
       }
     }
   );
+  // =====================================
+// Stripe: Create Checkout Session
+// =====================================
+
+
+app.post(
+  "/api/payments/create-checkout-session",
+  verifyToken,
+  async (req, res) => {
+    try {
+      const { usersCollection } = getCollections();
+
+
+      const email = req.user.email?.trim().toLowerCase();
+
+
+      if (!email) {
+        return res.status(401).json({
+          success: false,
+          message: "User email not found",
+        });
+      }
+
+
+      // Always get current user data from MongoDB
+      const user = await usersCollection.findOne({
+        email,
+      });
+
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+
+      // Only Student and Tutor can purchase Pro
+      if (!["student", "tutor"].includes(user.role)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only students and tutors can purchase Pro",
+        });
+      }
+
+
+      const currentPlan =
+        user.subscriptionPlan || user.plan || "free";
+
+
+      if (currentPlan === "pro") {
+        return res.status(400).json({
+          success: false,
+          message: "You already have a Pro subscription",
+        });
+      }
+
+
+      // Select price using database role
+      const priceId =
+        user.role === "tutor"
+          ? process.env.STRIPE_TUTOR_PRICE_ID
+          : process.env.STRIPE_STUDENT_PRICE_ID;
+
+
+      if (!priceId) {
+        return res.status(500).json({
+          success: false,
+          message: "Stripe Price ID is missing",
+        });
+      }
+
+
+      const metadata = {
+        userId: String(user._id),
+        userEmail: user.email,
+        userName: user.name || "",
+        userRole: user.role,
+        planName: "pro",
+      };
+
+
+      const session = await stripe.checkout.sessions.create({
+        mode: "subscription",
+
+
+        line_items: [
+          {
+            price: priceId,
+            quantity: 1,
+          },
+        ],
+
+
+        customer_email: user.email,
+
+
+        client_reference_id: String(user._id),
+
+
+        metadata,
+
+
+        subscription_data: {
+          metadata,
+        },
+
+
+        success_url:
+          `${process.env.CLIENT_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+
+
+        cancel_url:
+          `${process.env.CLIENT_URL}/payment/cancel`,
+      });
+
+
+      return res.status(200).json({
+        success: true,
+        url: session.url,
+      });
+    } catch (error) {
+      console.error("Stripe Checkout Error:", error);
+
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to create checkout session",
+      });
+    }
+  }
+);
+
 
   // -------------------------------------
   // Admin: Stripe payment records
   // -------------------------------------
+
 
   app.get(
     "/api/admin/payments",
@@ -2201,14 +2659,19 @@ app.patch(
       try {
         const { paymentsCollection } = getCollections();
 
+
         const { search = "" } = req.query;
+
 
         const query = {};
 
+
         const trimmed = String(search).trim();
+
 
         if (trimmed) {
           const pattern = new RegExp(escapeRegex(trimmed), "i");
+
 
           query.$or = [
             { userName: pattern },
@@ -2218,11 +2681,13 @@ app.patch(
           ];
         }
 
+
         const payments = await paymentsCollection
           .find(query)
           .sort({ paidAt: -1, createdAt: -1 })
           .limit(1000)
           .toArray();
+
 
         return res.status(200).json({
           success: true,
@@ -2232,6 +2697,7 @@ app.patch(
       } catch (error) {
         console.error("Admin Payments Error:", error);
 
+
         return res.status(500).json({
           success: false,
           message: "Failed to load payments",
@@ -2240,17 +2706,21 @@ app.patch(
     }
   );
 
+
   // -------------------------------------
   // Get logged-in user's profile
   // -------------------------------------
+
 
   app.get("/api/profile", verifyToken, async (req, res) => {
     try {
       const { usersCollection } = getCollections();
 
+
       const user = await usersCollection.findOne({
         email: req.user.email,
       });
+
 
       if (!user) {
         return res.status(404).json({
@@ -2258,6 +2728,7 @@ app.patch(
           message: "User not found",
         });
       }
+
 
       return res.status(200).json({
         success: true,
@@ -2274,6 +2745,7 @@ app.patch(
     } catch (error) {
       console.error("Get Profile Error:", error);
 
+
       return res.status(500).json({
         success: false,
         message: "Failed to load profile",
@@ -2281,13 +2753,16 @@ app.patch(
     }
   });
 
+
   // -------------------------------------
   // Update logged-in user's profile
   // -------------------------------------
 
+
   app.patch("/api/profile", verifyToken, async (req, res) => {
     try {
       const { name, phone, bio, image } = req.body || {};
+
 
       if (typeof name !== "string" || !name.trim()) {
         return res.status(400).json({
@@ -2295,6 +2770,7 @@ app.patch(
           message: "Name is required",
         });
       }
+
 
       if (
         typeof phone !== "string" ||
@@ -2307,6 +2783,7 @@ app.patch(
         });
       }
 
+
       if (
         name.trim().length > 100 ||
         phone.length > 20 ||
@@ -2318,6 +2795,7 @@ app.patch(
         });
       }
 
+
       if (
         image.trim() &&
         !/^https?:\/\/.+/i.test(image.trim())
@@ -2328,7 +2806,9 @@ app.patch(
         });
       }
 
+
       const { usersCollection } = getCollections();
+
 
       const result = await usersCollection.updateOne(
         {
@@ -2345,6 +2825,7 @@ app.patch(
         }
       );
 
+
       if (result.matchedCount === 0) {
         return res.status(404).json({
           success: false,
@@ -2352,12 +2833,14 @@ app.patch(
         });
       }
 
+
       return res.status(200).json({
         success: true,
         message: "Profile updated successfully",
       });
     } catch (error) {
       console.error("Update Profile Error:", error);
+
 
       return res.status(500).json({
         success: false,
@@ -2367,14 +2850,17 @@ app.patch(
   });
 };
 
+
 // -------------------------------------
 // Error Handler
 // -------------------------------------
+
 
 // Error handler must be registered AFTER API routes.
 const registerErrorHandler = () => {
   app.use((error, req, res, next) => {
     console.error("API Error:", error);
+
 
     if (error instanceof multer.MulterError) {
       if (error.code === "LIMIT_FILE_SIZE") {
@@ -2384,11 +2870,13 @@ const registerErrorHandler = () => {
         });
       }
 
+
       return res.status(400).json({
         success: false,
         message: error.message,
       });
     }
+
 
     if (
       error.message?.includes("Only JPG, PNG and WEBP")
@@ -2399,6 +2887,7 @@ const registerErrorHandler = () => {
       });
     }
 
+
     return res.status(500).json({
       success: false,
       message: "Something went wrong on the server.",
@@ -2406,9 +2895,11 @@ const registerErrorHandler = () => {
   });
 };
 
+
 // -------------------------------------
 // Start Server
 // -------------------------------------
+
 
 const startServer = async () => {
   try {
@@ -2416,29 +2907,256 @@ const startServer = async () => {
       throw new Error("MONGODB_URI is missing in .env");
     }
 
+
     if (!process.env.BETTER_AUTH_SECRET) {
       throw new Error("BETTER_AUTH_SECRET is missing in .env");
     }
 
+
     await connectDB();
 
+
+    // Stripe payment idempotency indexes (prevent duplicate records)
+    await db.collection("payments").createIndex(
+      { stripeSessionId: 1 },
+      {
+        unique: true,
+        partialFilterExpression: {
+          stripeSessionId: { $type: "string" },
+        },
+      }
+    );
+
+    await db.collection("payments").createIndex(
+      { stripeInvoiceId: 1 },
+      {
+        unique: true,
+        partialFilterExpression: {
+          stripeInvoiceId: { $type: "string" },
+        },
+      }
+    );
+
+
+    // Initialize Stripe on the backend only
+    if (!process.env.STRIPE_SECRET_KEY) {
+      throw new Error("STRIPE_SECRET_KEY is missing");
+    }
+
+    if (!process.env.STRIPE_WEBHOOK_SECRET) {
+      throw new Error("STRIPE_WEBHOOK_SECRET is missing");
+    }
+
+    stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+
     const auth = createAuth(db);
+
 
     // Better Auth must be mounted before express.json()
     app.all("/api/auth/*splat", toNodeHandler(auth));
 
+
+    // =====================================
+    // Stripe Webhook
+    // MUST BE BEFORE express.json()
+    // =====================================
+    app.post(
+      "/api/payments/webhook",
+      express.raw({ type: "application/json" }),
+      async (req, res) => {
+        const signature = req.headers["stripe-signature"];
+        let event;
+
+        try {
+          event = stripe.webhooks.constructEvent(
+            req.body,
+            signature,
+            process.env.STRIPE_WEBHOOK_SECRET
+          );
+        } catch (error) {
+          console.error("Stripe Signature Error:", error.message);
+          return res.status(400).send(`Webhook Error: ${error.message}`);
+        }
+
+        try {
+          const { usersCollection, paymentsCollection } = getCollections();
+
+          // Initial successful Checkout subscription
+          if (
+            event.type === "checkout.session.completed" ||
+            event.type === "checkout.session.async_payment_succeeded"
+          ) {
+            const session = event.data.object;
+
+            if (session.mode !== "subscription" || session.payment_status !== "paid") {
+              return res.json({ received: true });
+            }
+
+            const metadata = session.metadata || {};
+            const email = String(metadata.userEmail || "").trim().toLowerCase();
+            if (!email) throw new Error("User email missing from Stripe metadata");
+
+            const user = await usersCollection.findOne({ email });
+            if (!user || user.role !== metadata.userRole) {
+              throw new Error("Matching user or role not found");
+            }
+
+            const paidAt = new Date((session.created || Date.now() / 1000) * 1000);
+            const transactionId =
+              typeof session.payment_intent === "string"
+                ? session.payment_intent
+                : (typeof session.subscription === "string" ? session.subscription : session.id);
+
+            const paymentRecord = {
+              userEmail: user.email,
+              userName: user.name || "",
+              userRole: user.role,
+              planName: "pro",
+              amount: (session.amount_total || 0) / 100,
+              currency: session.currency || "usd",
+              transactionId,
+              stripeSessionId: session.id,
+              stripeSubscriptionId: session.subscription,
+              paymentStatus: "paid",
+              paidAt,
+              createdAt: new Date(),
+            };
+
+            await paymentsCollection.updateOne(
+              { stripeSessionId: session.id },
+              { $setOnInsert: paymentRecord },
+              { upsert: true }
+            );
+
+            await usersCollection.updateOne(
+              { _id: user._id },
+              {
+                $set: {
+                  subscriptionPlan: "pro",
+                  plan: "pro",
+                  stripeCustomerId: session.customer,
+                  stripeSubscriptionId: session.subscription,
+                  subscriptionStatus: "active",
+                  updatedAt: new Date(),
+                },
+              }
+            );
+            console.log("Pro subscription activated:", user.email);
+          }
+
+          // Recurring subscription renewal payment
+          if (event.type === "invoice.paid") {
+            const invoice = event.data.object;
+            const subscriptionId =
+              typeof invoice.subscription === "string"
+                ? invoice.subscription
+                : invoice.parent?.subscription_details?.subscription;
+
+            if (invoice.billing_reason !== "subscription_create" && subscriptionId) {
+              const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+              const email = String(subscription.metadata?.userEmail || "").trim().toLowerCase();
+              if (email) {
+                const user = await usersCollection.findOne({ email });
+                if (user && user.role === subscription.metadata?.userRole) {
+                  const renewalRecord = {
+                    userEmail: user.email,
+                    userName: user.name || "",
+                    userRole: user.role,
+                    planName: "pro",
+                    amount: (invoice.amount_paid || 0) / 100,
+                    currency: invoice.currency || "usd",
+                    transactionId:
+                      typeof invoice.payment_intent === "string"
+                        ? invoice.payment_intent
+                        : invoice.id,
+                    stripeInvoiceId: invoice.id,
+                    stripeSubscriptionId: subscriptionId,
+                    paymentStatus: "paid",
+                    paidAt: new Date((invoice.created || Date.now() / 1000) * 1000),
+                    createdAt: new Date(),
+                  };
+
+                  await paymentsCollection.updateOne(
+                    { stripeInvoiceId: invoice.id },
+                    { $setOnInsert: renewalRecord },
+                    { upsert: true }
+                  );
+
+                  await usersCollection.updateOne(
+                    { _id: user._id },
+                    { $set: { subscriptionPlan: "pro", plan: "pro", subscriptionStatus: "active", updatedAt: new Date() } }
+                  );
+                }
+              }
+            }
+          }
+
+          // Failed renewal payment: keep Pro access but mark past_due
+          if (event.type === "invoice.payment_failed") {
+            const invoice = event.data.object;
+            const subscriptionId =
+              typeof invoice.subscription === "string"
+                ? invoice.subscription
+                : invoice.parent?.subscription_details?.subscription;
+
+            if (subscriptionId) {
+              const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+              const email = String(subscription.metadata?.userEmail || "").trim().toLowerCase();
+              if (email) {
+                await usersCollection.updateOne(
+                  { email, stripeSubscriptionId: subscriptionId },
+                  { $set: { subscriptionStatus: "past_due", updatedAt: new Date() } }
+                );
+              }
+            }
+          }
+
+          // Subscription cancelled: only change the matching current subscription
+          if (event.type === "customer.subscription.deleted") {
+            const subscription = event.data.object;
+            const email = String(subscription.metadata?.userEmail || "").trim().toLowerCase();
+            if (email) {
+              await usersCollection.updateOne(
+                { email, stripeSubscriptionId: subscription.id },
+                {
+                  $set: {
+                    subscriptionPlan: "free",
+                    plan: "free",
+                    subscriptionStatus: "canceled",
+                    updatedAt: new Date(),
+                  },
+                }
+              );
+              console.log("Subscription cancellation processed:", email);
+            }
+          }
+
+          return res.json({ received: true });
+        } catch (error) {
+          console.error("Stripe Webhook Processing Error:", error);
+          return res.status(500).json({ success: false, message: "Webhook processing failed" });
+        }
+      }
+    );
+
+
     // JSON parser for API routes
     app.use(express.json());
+
 
     // Register all application routes
     registerApiRoutes();
 
+
     // Register error handler after routes
     registerErrorHandler();
+
 
     app.listen(PORT, () => {
       console.log(`MentorLagbe Server running on port ${PORT}`);
       console.log(`Local URL: http://localhost:${PORT}`);
+
 
       console.log(
         `BetterAuth URL: ${
@@ -2451,5 +3169,6 @@ const startServer = async () => {
     process.exit(1);
   }
 };
+
 
 startServer();

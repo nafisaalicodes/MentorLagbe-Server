@@ -28,10 +28,7 @@ export const verifyToken = async (req, res, next) => {
       });
     }
 
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: authBaseURL,
-      audience: authBaseURL,
-    });
+    const { payload } = await jwtVerify(token, JWKS);
 
     const userId = payload.id || payload.sub;
 

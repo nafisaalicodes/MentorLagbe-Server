@@ -959,7 +959,7 @@ app.get(
           totalTuitions,
           activeTuitions,
           totalApplicants,
-          currentPlan: plan === "pro" ? "Pro" : "Free",
+          plan: plan === "pro" ? "Pro" : "Free",
           postLimit: plan === "pro" ? null : 2,
           remainingPosts:
             plan === "pro"

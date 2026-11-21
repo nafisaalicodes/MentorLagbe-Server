@@ -352,7 +352,7 @@ const registerApiRoutes = () => {
       }
 
 
-      const { tuitionsCollection } = getCollections();
+      const { tuitionsCollection, usersCollection } = getCollections();
 
 
       const tuition = await tuitionsCollection.findOne({
@@ -370,9 +370,24 @@ const registerApiRoutes = () => {
       }
 
 
+      // Attach the tutor's plan so the UI can show the Pro "Verified" badge.
+      let tutorPlan = "free";
+
+      if (tuition.tutorEmail) {
+        const tutor = await usersCollection.findOne(
+          { email: tuition.tutorEmail },
+          { projection: { subscriptionPlan: 1, plan: 1 } }
+        );
+
+        tutorPlan = String(
+          tutor?.subscriptionPlan || tutor?.plan || "free"
+        ).toLowerCase();
+      }
+
+
       return res.status(200).json({
         success: true,
-        data: tuition,
+        data: { ...tuition, tutorPlan },
       });
     } catch (error) {
       console.error("Get Tuition Details Error:", error);
@@ -1145,6 +1160,7 @@ app.post(
         daysPerWeek: days,
         description: description.trim(),
         bannerUrl: bannerUrl.trim(),
+        bannerImage: bannerUrl.trim(),
 
 
         tutorId: req.user.id,
@@ -1469,6 +1485,12 @@ app.patch(
         if (typeof updateData[field] === "string") {
           updateData[field] = updateData[field].trim();
         }
+      }
+
+
+      // Keep the legacy `bannerImage` field in sync with `bannerUrl`.
+      if (typeof updateData.bannerUrl === "string") {
+        updateData.bannerImage = updateData.bannerUrl;
       }
 
 
@@ -2740,6 +2762,9 @@ app.post(
           phone: user.phone || "",
           bio: user.bio || "",
           image: user.image || "",
+          plan: String(
+            user.subscriptionPlan || user.plan || "free"
+          ).toLowerCase(),
         },
       });
     } catch (error) {

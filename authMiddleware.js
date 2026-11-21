@@ -53,13 +53,17 @@ export const verifyToken = async (req, res, next) => {
 
     next();
   } catch (error) {
-    console.error("JWT Verification Error:", error.message);
+  console.error("JWT Verification Failed:", {
+    name: error.name,
+    code: error.code,
+    message: error.message,
+  });
 
-    return res.status(401).json({
-      success: false,
-      message: "Invalid or expired token",
-    });
-  }
+  return res.status(401).json({
+    success: false,
+    message: "Invalid or expired token",
+  });
+}
 };
 
 // Student only

@@ -4,8 +4,12 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 const authBaseURL =
   process.env.BETTER_AUTH_URL || "http://localhost:5000";
 
+const jwksURL = `${authBaseURL.replace(/\/+$/, "")}/api/auth/jwks`;
+
+console.log("JWKS URL:", jwksURL);
+
 const JWKS = createRemoteJWKSet(
-  new URL(`${authBaseURL}/api/auth/jwks`)
+  new URL(jwksURL)
 );
 
 export const verifyToken = async (req, res, next) => {
@@ -57,6 +61,7 @@ export const verifyToken = async (req, res, next) => {
     name: error.name,
     code: error.code,
     message: error.message,
+    cause: error.cause?.message,
   });
 
   return res.status(401).json({

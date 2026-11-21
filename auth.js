@@ -18,6 +18,14 @@ export const createAuth = (db) => {
 
     secret: process.env.BETTER_AUTH_SECRET,
 
+     advanced: {
+      defaultCookieAttributes: {
+        sameSite: "none",
+        secure: true,
+        httpOnly: true,
+      },
+    },
+
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 8,

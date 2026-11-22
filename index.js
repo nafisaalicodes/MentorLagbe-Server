@@ -33,11 +33,6 @@ const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = process.env.DB_NAME || "MentorLagbe";
 
 
-// -------------------------------------
-// Middleware
-// -------------------------------------
-
-
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:3000",
@@ -90,11 +85,6 @@ const getCollections = () => {
 };
 
 
-// -------------------------------------
-// Multer Image Upload Configuration
-// -------------------------------------
-
-
 const allowedMimeTypes = [
   "image/jpeg",
   "image/png",
@@ -124,16 +114,10 @@ const imageUpload = multer({
 });
 
 
-// -------------------------------------
-// Upload Image to ImgBB
-// -------------------------------------
-
-
 const uploadToImgBB = async (file) => {
   if (!process.env.IMGBB_API_KEY) {
     throw new Error("IMGBB_API_KEY is missing in backend .env");
   }
-
 
   if (!file) {
     throw new Error("Please select an image.");
@@ -141,8 +125,6 @@ const uploadToImgBB = async (file) => {
 
 
   const formData = new FormData();
-
-
   formData.append(
     "image",
     file.buffer.toString("base64")
@@ -177,25 +159,10 @@ const uploadToImgBB = async (file) => {
 };
 
 
-// -------------------------------------
-// API Routes
-// -------------------------------------
-
-
 const registerApiRoutes = () => {
-  // -------------------------------------
-  // Root API
-  // -------------------------------------
-
-
   app.get("/", (req, res) => {
     res.send("MentorLagbe Server is Running!");
   });
-
-
-  // -------------------------------------
-  // Health API
-  // -------------------------------------
 
 
   app.get("/api/health", async (req, res) => {
@@ -217,11 +184,6 @@ const registerApiRoutes = () => {
       });
     }
   });
-
-
-  // -------------------------------------
-  // Public: Latest approved tuitions
-  // -------------------------------------
 
 
   app.get("/api/tuitions", async (req, res) => {
@@ -254,11 +216,6 @@ const registerApiRoutes = () => {
       });
     }
   });
-
-
-  // -------------------------------------
-  // Public: Browse tuitions
-  // -------------------------------------
 
 
   app.get("/api/tuitions/browse", async (req, res) => {
@@ -334,11 +291,6 @@ const registerApiRoutes = () => {
   });
 
 
-  // -------------------------------------
-  // Public: Get tuition details by ID
-  // -------------------------------------
-
-
   app.get("/api/tuitions/:id", async (req, res) => {
     try {
       const { id } = req.params;
@@ -369,8 +321,6 @@ const registerApiRoutes = () => {
         });
       }
 
-
-      // Attach the tutor's plan so the UI can show the Pro "Verified" badge.
       let tutorPlan = "free";
 
       if (tuition.tutorEmail) {
@@ -399,11 +349,6 @@ const registerApiRoutes = () => {
       });
     }
   });
-
-
-  // -------------------------------------
-  // Student: Apply for a tuition
-  // -------------------------------------
 
 
   app.post(
@@ -504,7 +449,6 @@ const registerApiRoutes = () => {
         }
 
 
-        // Check both ObjectId and older string-format records.
         const existingApplication =
           await applicationsCollection.findOne({
             studentEmail,
@@ -571,16 +515,6 @@ const registerApiRoutes = () => {
       }
     }
   );
-
-
-  // =====================================
-  // STUDENT DASHBOARD ROUTES
-  // =====================================
-
-
-  // -------------------------------------
-  // A. Student Dashboard: Overview Stats
-  // -------------------------------------
 
 
   app.get(
@@ -665,10 +599,6 @@ const registerApiRoutes = () => {
     }
   );
 
-
-  // -------------------------------------
-  // B. Student Dashboard: My Applications
-  // -------------------------------------
 
 
   app.get(
@@ -810,11 +740,6 @@ const registerApiRoutes = () => {
   );
 
 
-  // -------------------------------------
-  // C. Student Dashboard: Cancel Application
-  // -------------------------------------
-
-
   app.delete(
     "/api/student/applications/:id",
     verifyToken,
@@ -875,16 +800,6 @@ const registerApiRoutes = () => {
       }
     }
   );
-
-
-  // =====================================
-// TUTOR DASHBOARD ROUTES
-// =====================================
-
-
-// -------------------------------------
-// A. Tutor Dashboard Overview Stats
-// -------------------------------------
 
 
 app.get(
@@ -978,11 +893,6 @@ app.get(
     }
   }
 );
-
-
-// -------------------------------------
-// B. Tutor: Create New Tuition
-// -------------------------------------
 
 
 app.post(
@@ -1137,9 +1047,6 @@ app.post(
       });
 
 
-      // Free Plan: Maximum 2 tuition posts
-
-
       if (plan !== "pro" && totalPosts >= 2) {
         return res.status(403).json({
           success: false,
@@ -1199,11 +1106,6 @@ app.post(
     }
   }
 );
-
-
-// -------------------------------------
-// C. Tutor: Get My Tuitions
-// -------------------------------------
 
 app.get(
   "/api/tutor/tuitions",
@@ -1294,12 +1196,6 @@ app.get(
     }
   }
 );
-
-
-
-// -------------------------------------
-// D. Tutor: Update Tuition
-// -------------------------------------
 
 
 app.patch(
@@ -1487,8 +1383,6 @@ app.patch(
         }
       }
 
-
-      // Keep the legacy `bannerImage` field in sync with `bannerUrl`.
       if (typeof updateData.bannerUrl === "string") {
         updateData.bannerImage = updateData.bannerUrl;
       }
@@ -1533,11 +1427,6 @@ app.patch(
 );
 
 
-// -------------------------------------
-// E. Tutor: Delete Tuition
-// -------------------------------------
-
-
 app.delete(
   "/api/tutor/tuitions/:id",
   verifyToken,
@@ -1579,10 +1468,6 @@ app.delete(
       }
 
 
-      // Delete related applications first.
-      // This version also works with standalone local MongoDB.
-
-
       await applicationsCollection.deleteMany({
         $or: [
           { tuitionId: tuitionObjectId },
@@ -1612,11 +1497,6 @@ app.delete(
     }
   }
 );
-
-
-// -------------------------------------
-// F. Tutor: Toggle Tuition Active Status
-// -------------------------------------
 
 
 app.patch(
@@ -1688,11 +1568,6 @@ app.patch(
     }
   }
 );
-
-
-// -------------------------------------
-// G. Tutor: Get All Applicants
-// -------------------------------------
 
 
 app.get(
@@ -1835,11 +1710,6 @@ app.get(
 );
 
 
-// -------------------------------------
-// H. Tutor: Accept / Reject Applicant
-// -------------------------------------
-
-
 app.patch(
   "/api/tutor/applicants/:id/status",
   verifyToken,
@@ -1945,16 +1815,6 @@ app.patch(
 );
 
 
-  // =====================================
-  // PROFILE & IMAGE ROUTES
-  // =====================================
-
-
-  // -------------------------------------
-  // Protected: Upload profile picture
-  // -------------------------------------
-
-
   app.post(
     "/api/profile/upload-image",
     verifyToken,
@@ -1989,10 +1849,6 @@ app.patch(
     }
   );
 
-
-  // -------------------------------------
-  // Protected: Upload tuition banner
-  // -------------------------------------
 
 
   app.post(
@@ -2041,11 +1897,6 @@ app.patch(
   );
 
 
-  // -------------------------------------
-  // Protected: Any logged-in user
-  // -------------------------------------
-
-
   app.get("/api/protected", verifyToken, (req, res) => {
     return res.json({
       success: true,
@@ -2053,11 +1904,6 @@ app.patch(
       user: req.user,
     });
   });
-
-
-  // -------------------------------------
-  // Student dashboard health route
-  // -------------------------------------
 
 
   app.get(
@@ -2074,11 +1920,6 @@ app.patch(
   );
 
 
-  // -------------------------------------
-  // Tutor dashboard
-  // -------------------------------------
-
-
   app.get(
     "/api/tutor/dashboard",
     verifyToken,
@@ -2091,11 +1932,6 @@ app.patch(
       });
     }
   );
-
-
-  // -------------------------------------
-  // Admin dashboard
-  // -------------------------------------
 
 
   app.get(
@@ -2111,14 +1947,6 @@ app.patch(
     }
   );
 
-
-  // -------------------------------------
-  // Admin: helpers
-  // -------------------------------------
-
-
-  // BetterAuth may store _id as string or ObjectId depending on
-  // the adapter, so every id lookup matches both shapes.
   const buildIdFilter = (rawId) => {
     const id = String(rawId || "");
 
@@ -2142,10 +1970,6 @@ app.patch(
   const isValidRole = (role) =>
     ["student", "tutor", "admin"].includes(String(role));
 
-
-  // -------------------------------------
-  // Admin: Platform statistics
-  // -------------------------------------
 
 
   app.get(
@@ -2195,9 +2019,6 @@ app.patch(
           .find({})
           .toArray();
 
-
-        // Everything that is not explicitly failed/refunded counts
-        // as settled revenue (Stripe webhook stores "paid").
         const settledPayments = payments.filter((payment) => {
           const status = String(
             payment.paymentStatus || "paid"
@@ -2243,11 +2064,6 @@ app.patch(
       }
     }
   );
-
-
-  // -------------------------------------
-  // Admin: All registered users
-  // -------------------------------------
 
 
   app.get(
@@ -2316,11 +2132,6 @@ app.patch(
       }
     }
   );
-
-
-  // -------------------------------------
-  // Admin: Update a user's role
-  // -------------------------------------
 
 
   app.patch(
@@ -2395,11 +2206,6 @@ app.patch(
   );
 
 
-  // -------------------------------------
-  // Admin: All tuition posts (moderation)
-  // -------------------------------------
-
-
   app.get(
     "/api/admin/tuitions",
     verifyToken,
@@ -2459,11 +2265,6 @@ app.patch(
       }
     }
   );
-
-
-  // -------------------------------------
-  // Admin: Approve / Reject a tuition
-  // -------------------------------------
 
 
   app.patch(
@@ -2533,9 +2334,6 @@ app.patch(
       }
     }
   );
-  // =====================================
-// Stripe: Create Checkout Session
-// =====================================
 
 
 app.post(
@@ -2556,8 +2354,6 @@ app.post(
         });
       }
 
-
-      // Always get current user data from MongoDB
       const user = await usersCollection.findOne({
         email,
       });
@@ -2570,8 +2366,6 @@ app.post(
         });
       }
 
-
-      // Only Student and Tutor can purchase Pro
       if (!["student", "tutor"].includes(user.role)) {
         return res.status(403).json({
           success: false,
@@ -2591,8 +2385,6 @@ app.post(
         });
       }
 
-
-      // Select price using database role
       const priceId =
         user.role === "tutor"
           ? process.env.STRIPE_TUTOR_PRICE_ID
@@ -2668,10 +2460,6 @@ app.post(
 );
 
 
-  // -------------------------------------
-  // Admin: Stripe payment records
-  // -------------------------------------
-
 
   app.get(
     "/api/admin/payments",
@@ -2729,11 +2517,6 @@ app.post(
   );
 
 
-  // -------------------------------------
-  // Get logged-in user's profile
-  // -------------------------------------
-
-
   app.get("/api/profile", verifyToken, async (req, res) => {
     try {
       const { usersCollection } = getCollections();
@@ -2777,11 +2560,6 @@ app.post(
       });
     }
   });
-
-
-  // -------------------------------------
-  // Update logged-in user's profile
-  // -------------------------------------
 
 
   app.patch("/api/profile", verifyToken, async (req, res) => {
@@ -2875,13 +2653,6 @@ app.post(
   });
 };
 
-
-// -------------------------------------
-// Error Handler
-// -------------------------------------
-
-
-// Error handler must be registered AFTER API routes.
 const registerErrorHandler = () => {
   app.use((error, req, res, next) => {
     console.error("API Error:", error);
@@ -2921,11 +2692,6 @@ const registerErrorHandler = () => {
 };
 
 
-// -------------------------------------
-// Start Server
-// -------------------------------------
-
-
 const startServer = async () => {
   try {
     if (!MONGODB_URI) {
@@ -2940,8 +2706,6 @@ const startServer = async () => {
 
     await connectDB();
 
-
-    // Stripe payment idempotency indexes (prevent duplicate records)
     await db.collection("payments").createIndex(
       { stripeSessionId: 1 },
       {
@@ -2962,8 +2726,6 @@ const startServer = async () => {
       }
     );
 
-
-    // Initialize Stripe on the backend only
     if (!process.env.STRIPE_SECRET_KEY) {
       throw new Error("STRIPE_SECRET_KEY is missing");
     }
@@ -2977,15 +2739,8 @@ const startServer = async () => {
 
     const auth = createAuth(db);
 
-
-    // Better Auth must be mounted before express.json()
     app.all("/api/auth/*splat", toNodeHandler(auth));
 
-
-    // =====================================
-    // Stripe Webhook
-    // MUST BE BEFORE express.json()
-    // =====================================
     app.post(
       "/api/payments/webhook",
       express.raw({ type: "application/json" }),
@@ -3007,7 +2762,6 @@ const startServer = async () => {
         try {
           const { usersCollection, paymentsCollection } = getCollections();
 
-          // Initial successful Checkout subscription
           if (
             event.type === "checkout.session.completed" ||
             event.type === "checkout.session.async_payment_succeeded"
@@ -3070,7 +2824,6 @@ const startServer = async () => {
             console.log("Pro subscription activated:", user.email);
           }
 
-          // Recurring subscription renewal payment
           if (event.type === "invoice.paid") {
             const invoice = event.data.object;
             const subscriptionId =
@@ -3117,7 +2870,6 @@ const startServer = async () => {
             }
           }
 
-          // Failed renewal payment: keep Pro access but mark past_due
           if (event.type === "invoice.payment_failed") {
             const invoice = event.data.object;
             const subscriptionId =
@@ -3137,7 +2889,6 @@ const startServer = async () => {
             }
           }
 
-          // Subscription cancelled: only change the matching current subscription
           if (event.type === "customer.subscription.deleted") {
             const subscription = event.data.object;
             const email = String(subscription.metadata?.userEmail || "").trim().toLowerCase();
@@ -3165,16 +2916,10 @@ const startServer = async () => {
       }
     );
 
-
-    // JSON parser for API routes
     app.use(express.json());
 
-
-    // Register all application routes
     registerApiRoutes();
 
-
-    // Register error handler after routes
     registerErrorHandler();
 
 

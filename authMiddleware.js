@@ -71,7 +71,6 @@ export const verifyToken = async (req, res, next) => {
 }
 };
 
-// Student only
 export const verifyStudent = (req, res, next) => {
   if (req.user?.role !== "student") {
     return res.status(403).json({
@@ -83,7 +82,6 @@ export const verifyStudent = (req, res, next) => {
   next();
 };
 
-// Tutor only
 export const verifyTutor = (req, res, next) => {
   if (req.user?.role !== "tutor") {
     return res.status(403).json({
@@ -95,7 +93,6 @@ export const verifyTutor = (req, res, next) => {
   next();
 };
 
-// Admin only
 export const verifyAdmin = (req, res, next) => {
   if (req.user?.role !== "admin") {
     return res.status(403).json({

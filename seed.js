@@ -1,40 +1,10 @@
-/**
- * ============================================================================
- *  MentorLagbe — Demo Seed Script
- * ============================================================================
- *
- *  Creates realistic, fully connected demo data so the live site looks rich
- *  and complete:
- *
- *    • Tutor user accounts      (role: "tutor")  + login credentials
- *    • Student user accounts    (role: "student") + login credentials
- *    • Approved tuition listings (14 total across 11 subjects)
- *    • Applications linking every student to a real tuition + tutor
- *
- *  Safety guarantees
- *    - Idempotent: running it twice never creates duplicates.
- *    - Never overwrites an existing user, password, session or record.
- *      Existing users are skipped completely (their credentials are never
- *      touched, their role/plan/bio are never changed).
- *    - Only records created by this script carry `seeded: true` and are the
- *      only records `--rollback` will ever remove.
- *
- *  Usage
- *    node seed.js             Seed demo data (safe to re-run)
- *    node seed.js --verify    Print a verification report (DB + dashboard math)
- *    node seed.js --rollback  Remove ONLY the demo records created by this script
- *
- *  Demo login (for every account created by this script)
- *    Password: Mentor@12345
- * ============================================================================
- */
 
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { MongoClient } from "mongodb";
 import { hashPassword } from "better-auth/crypto";
 
-// Load the backend .env no matter which directory the script is run from.
+
 dotenv.config({ path: fileURLToPath(new URL("./.env", import.meta.url)) });
 
 if (!process.env.MONGODB_URI) {
@@ -48,11 +18,6 @@ const SEED_BATCH = "mentorlagbe-demo-v1";
 const DEMO_PASSWORD = "Mentor@12345";
 
 const TAG = { seeded: true, demoData: true, seedBatch: SEED_BATCH };
-
-// ---------------------------------------------------------------------------
-// Demo tutor accounts (these tutor emails already appear on listings that
-// existed before this script, so the listings become fully connected).
-// ---------------------------------------------------------------------------
 
 const TUTORS = [
   {
@@ -153,11 +118,6 @@ const TUTORS = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Demo student accounts (they apply to real listings, so the student and
-// tutor dashboards both show connected data).
-// ---------------------------------------------------------------------------
-
 const STUDENTS = [
   {
     name: "Sumaiya Rahman",
@@ -184,11 +144,6 @@ const STUDENTS = [
     bio: "Guardian of a Class 4 student searching for a patient primary tutor, and preparing for IELTS alongside work.",
   },
 ];
-
-// ---------------------------------------------------------------------------
-// New approved tuition listings (existing listings stay exactly as they are
-// and are only "connected" to the tutor accounts above).
-// ---------------------------------------------------------------------------
 
 const TUITIONS = [
   {
@@ -289,10 +244,6 @@ const TUITIONS = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Applications: each one links a demo student → a real tuition → its tutor.
-// ---------------------------------------------------------------------------
-
 const APPLICATIONS = [
   {
     seedKey: "app-sumaiya-chem",
@@ -354,8 +305,6 @@ const APPLICATIONS = [
   },
 ];
 
-// Subject / class level options offered by the public browse page. The seed
-// covers every one of them so every filter returns results.
 const BROWSE_SUBJECTS = [
   "Mathematics",
   "Higher Mathematics",
@@ -379,10 +328,6 @@ const BROWSE_CLASS_LEVELS = [
   "University",
   "Adult",
 ];
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 const isDemoTuition = (tuition) =>
   String(tuition?.tutorEmail || "").toLowerCase().endsWith("@example.com");
@@ -410,14 +355,11 @@ async function connect() {
   };
 }
 
-// Inserts a user only when the email is completely unknown. An existing user
-// is never updated — that is how existing credentials stay untouched.
 async function ensureUser(users, profile, role) {
   const email = profile.email.toLowerCase();
   const existing = await users.findOne({ email });
 
   if (existing) {
-    // Only "our" demo users may ever get a missing login created later.
     return {
       user: existing,
       created: false,
@@ -445,8 +387,6 @@ async function ensureUser(users, profile, role) {
   return { user: { ...doc, _id: result.insertedId }, created: true, ours: true };
 }
 
-// Creates a Better Auth credential login only when the user has none.
-// Existing account documents (passwords) are never modified.
 async function ensureLogin(accounts, user) {
   const existingAccount = await accounts.findOne({ userId: user._id });
 
@@ -479,10 +419,6 @@ async function resolveTuition(tuitions, reference) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Seed
-// ---------------------------------------------------------------------------
-
 async function seed() {
   const db = await connect();
 
@@ -492,7 +428,6 @@ async function seed() {
   console.log("==============================================\n");
 
   try {
-    // 1. Users + logins ----------------------------------------------------
     let createdUsers = 0;
     let skippedUsers = 0;
     let createdLogins = 0;
@@ -552,7 +487,6 @@ async function seed() {
       studentDocs.map((user) => [String(user.email).toLowerCase(), user])
     );
 
-    // 2. Tuitions ----------------------------------------------------------
     let createdTuitions = 0;
     let existingTuitions = 0;
 
@@ -597,8 +531,6 @@ async function seed() {
       createdTuitions += 1;
     }
 
-    // Connect the pre-existing demo listings to the accounts above. Only
-    // missing fields are ever added — nothing existing is overwritten.
     let linkedListings = 0;
 
     const existingListings = await db.tuitions.find({}).toArray();
@@ -617,7 +549,6 @@ async function seed() {
         let tutor = tutorByEmail.get(email);
 
         if (!tutor && email) {
-          // Link to any existing account (seeded or pre-existing) by email.
           tutor = await db.users.findOne({ email });
         }
 
@@ -647,7 +578,6 @@ async function seed() {
         `${linkedListings} existing demo listing(s) linked/updated`
     );
 
-    // 3. Applications ------------------------------------------------------
     let createdApplications = 0;
     let existingApplications = 0;
 
@@ -716,9 +646,6 @@ async function seed() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Verify
-// ---------------------------------------------------------------------------
 
 async function verify() {
   const db = await connect();
@@ -844,8 +771,6 @@ async function verify() {
       `${seededUsers.length - seededWithoutLogin.length}/${seededUsers.length}`
     );
 
-    // The accounts that already existed in the database before the seed must
-    // still be there with exactly the same role and plan.
     const PRE_EXISTING_USERS = [
       { email: "nafis@gmail.com", role: "student", plan: "free" },
       { email: "rahim.tutor@example.com", role: "student", plan: "free" },
@@ -967,9 +892,6 @@ async function verify() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Rollback — removes ONLY records created by this script
-// ---------------------------------------------------------------------------
 
 async function rollback() {
   const db = await connect();
@@ -1055,10 +977,6 @@ async function rollback() {
     await db.client.close();
   }
 }
-
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
 
 const mode = process.argv[2];
 
